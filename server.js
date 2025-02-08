@@ -1,11 +1,14 @@
-const express = require("express");
-const cors = require("cors");
-const bcrypt = require("bcrypt");
-const { PrismaClient } = require("@prisma/client");
+import { createClient } from "@supabase/supabase-js";
+import express from 'express';
+import cors from 'cors';
+import bcrypt from 'bcrypt';
 
+const supabase = createClient(
+    'https://sbtpajhevouznzwsblsi.supabase.co/', 
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNidHBhamhldm91em56d3NibHNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzkwNDM3ODEsImV4cCI6MjA1NDYxOTc4MX0.BUU7EZu6tYoZC26z68TAR8f9yezz3A-Di8oPfr09fXA' 
+);
 
 const app = express();
-const prisma = new PrismaClient();
 
 app.use(cors({
     origin: "http://localhost:5173",
@@ -26,25 +29,28 @@ app.post("/register", async (req, res) => {
     }
 
     try {
-        const existingUser = await prisma.usuario.findUnique({
-            where: { usuario },
-        });
+        const { data: existingUser } = await supabase
+            .from('usuario')
+            .select('usuario')
+            .eq('usuario', usuario)
+            .single();
+
         if (existingUser) {
             return res.status(400).json({ error: "El usuario ya está registrado." });
         }
 
         const hashedPassword = await bcrypt.hash(contrasena, 10);
 
-        const nuevoUsuario = await prisma.usuario.create({
-            data: {
-                usuario,
-                contrasena: hashedPassword,
-            },
-        });
+        const { data: nuevoUsuario, error: insertError } = await supabase
+            .from('usuario')
+            .insert([{ usuario, contrasena: hashedPassword }]);
+
+        if (insertError) {
+            throw insertError;
+        }
 
         res.status(201).json({
             message: "Usuario registrado con éxito.",
-            usuario: nuevoUsuario.usuario,
         });
     } catch (error) {
         console.error("Error al registrar el usuario:", error);
@@ -60,16 +66,22 @@ app.post("/login", async (req, res) => {
     }
 
     try {
-        const user = await prisma.usuario.findUnique({
-            where: { usuario },
-        });
+        const { data: user, error } = await supabase
+            .from('usuario') 
+            .select('*') 
+            .eq('usuario', usuario) 
+            .single();
+
+        if (error) {
+            console.error("Error al buscar el usuario:", error);
+            return res.status(500).json({ error: "Error al buscar el usuario." });
+        }
 
         if (!user) {
             return res.status(404).json({ error: "Usuario no encontrado." });
         }
 
-        const isMatch = await bcrypt.compare(contrasena, user.contrasena);
-        if (!isMatch) {
+        if (!await bcrypt.compare(contrasena, user.contrasena)) {
             return res.status(401).json({ error: "Contraseña incorrecta." });
         }
 
@@ -79,10 +91,9 @@ app.post("/login", async (req, res) => {
     }
 });
 
-
 const PORT = 5000;
 app.listen(PORT, () => {
     console.log(`Servidor escuchando en el puerto ${PORT}`);
 });
 
-module.exports = app;
+export default app;
